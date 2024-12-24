@@ -11,7 +11,7 @@ from linebot.models import MessageEvent, TextMessage, TextSendMessage
 app = Flask(__name__)
 
 line_bot_api = LineBotApi('cMa+KNWK8VjVGrhHUFuadAfs+8fiwblbY5fTmBa3b2MIW7YUvXcMTOXfd/HbveMy0skcPSeGrb7YIYWkLmrxAzUWBG6uQ2HJtb1gayfIHkH7mJuH3Tsasu5IABgH0UUn+qZfqSxQY2d8Reu0kmO/qgdB04t89/1O/w1cDnyilFU=')
-handler = WebhookHandler('')
+handler = WebhookHandler('https://a-8edl.onrender.com')
 
 # 定義中獎訊息
 prize_messages = {
