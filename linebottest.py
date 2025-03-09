@@ -1,105 +1,111 @@
-# -*- coding: utf-8 -*-
-
-import os
-import requests
-import xml.etree.ElementTree as ET
+import sqlite3
+import yfinance as yf
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 
+# 初始化 Flask 應用
 app = Flask(__name__)
 
-line_bot_api = LineBotApi('cMa+KNWK8VjVGrhHUFuadAfs+8fiwblbY5fTmBa3b2MIW7YUvXcMTOXfd/HbveMy0skcPSeGrb7YIYWkLmrxAzUWBG6uQ2HJtb1gayfIHkH7mJuH3Tsasu5IABgH0UUn+qZfqSxQY2d8Reu0kmO/qgdB04t89/1O/w1cDnyilFU=')
-handler = WebhookHandler('5b750f8f51ea241fe0a6579fdcf61ed5')
+# 使用硬編碼方式設置 LINE Bot 的 Access Token 和 Channel Secret
+line_bot_api = LineBotApi('mXE1BzBQ67nBGrZGbBO0TEWrT3xy9h3rpk4sz+PGeC00bwwc3yvWz9BEANYMNpm0MqpSk7xfmEh6l2KEy/KFEAduvGPm3m7A++Sxl3eJTiSzeQlzZJhxXfDoiyEdfGnsDern1toKbzLJdDe/IvtFpwdB04t89/1O/w1cDnyilFU=')
+handler = WebhookHandler('7c7b7ddfcfa323b252f5f4d81a4bff1d')
 
-# 定義中獎訊息
-prize_messages = {
-    "特別獎": "恭喜！您中了特別獎，獎金新臺幣一千萬元。",
-    "特獎": "恭喜！您中了特獎，獎金新臺幣二百萬元。",
-    "頭獎": "恭喜！您中了頭獎，獎金新臺幣二十萬元。",
-    "二獎": "恭喜！您中了二獎，獎金新臺幣四萬元。",
-    "三獎": "恭喜！您中了三獎，獎金新臺幣一萬元。",
-    "四獎": "恭喜！您中了四獎，獎金新臺幣四千元。",
-    "五獎": "恭喜！您中了五獎，獎金新臺幣一千元。",
-    "六獎": "恭喜！您中了六獎，獎金新臺幣二百元。"
-}
+# SQLite 數據庫文件路徑
+DB_FILE_PATH = 'stocks_data.db'
 
-# 解析中獎號碼的函數
-def check_invoice(invoice_number):
-    # 從網址取得 XML 資料
-    url = 'https://invoice.etax.nat.gov.tw/invoice.xml'
+# 初始化 SQLite 數據庫
+def initialize_database():
+    conn = sqlite3.connect(DB_FILE_PATH)
+    c = conn.cursor()
+    # 創建 stocks 表
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS stocks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, 
+        ticker TEXT NOT NULL, 
+        company_name TEXT, 
+        valuation REAL, 
+        risk REAL, 
+        date TEXT NOT NULL
+    )
+    ''')
+    conn.commit()
+    conn.close()
+    print("SQLite 資料庫初始化完成，表 'stocks' 已創建。")
+
+# 查詢並保存股票健康狀況的函式
+def get_stock_health(stock_code):
     try:
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            tree = ET.fromstring(response.text)
-            item = tree.find('.//item')
-            description = item.find('description').text
-            special_prize = description.split('<p>特別獎：')[1].split('</p>')[0]
-            grand_prize = description.split('<p>特獎：')[1].split('</p>')[0]
-            first_prizes_str = [x.split('</p>')[0] for x in description.split('<p>頭獎：')[1:]]  # 取得所有頭獎的字串列表
+        stock = yf.Ticker(stock_code)  # 使用 yfinance 取得股票資訊
+        if stock.info and 'symbol' in stock.info:  # 確保股票資訊非空
+            ticker = stock_code
+            company_name = stock.info.get('longName', 'N/A')
+            valuation = stock.info.get('forwardPE', 'N/A')  # 取得估值（前瞻市盈率）
+            risk = stock.info.get('beta', 'N/A')  # 風險評估（Beta 值）
+            
+            # 保存數據到資料庫
+            save_to_database(ticker, company_name, valuation, risk)
 
-            # 將每個頭獎字串進一步分割為單獨的頭獎號碼
-            first_prizes = []
-            for prize_str in first_prizes_str:
-                first_prizes.extend(prize_str.split('、'))  # 將多個頭獎號碼加入到列表中
-            # 檢查是否中獎
-            if invoice_number == special_prize:
-                answer= "特別獎"
-            elif invoice_number == grand_prize:
-                answer= "特獎"
-            else:
-                for i in first_prizes:
-                    if invoice_number == i:
-                        answer= "頭獎"
-                    elif invoice_number[-7:]==i[-7:]:
-                        answer= "二獎"
-                    elif invoice_number[-6:]==i[-6:]:
-                        answer= "三獎"
-                    elif invoice_number[-5:]==i[-5:]:
-                        answer= "四獎"
-                    elif invoice_number[-4:]==i[-4:]:
-                        answer= "五獎"
-                    elif invoice_number[-3:]==i[-3:]:
-                        answer= "六獎"
-            try:
-                return answer
-            except:
-                return "可惜，您沒有沒中獎"
+            return (f"股票代號 {ticker} 的健康狀況：\n"
+                    f"公司名稱：{company_name}\n"
+                    f"估值（前瞻市盈率）：{valuation}\n"
+                    f"風險評估（Beta）：{risk}")
         else:
-            return "Error fetching the XML data."
-    except requests.exceptions.Timeout:
-        return "Connection timed out."
-    except requests.exceptions.ConnectionError:
-        return "Connection error occurred."
+            return "無法獲取股票健康資料，請檢查股票代號是否正確。"
+    except Exception as e:
+        return f"查詢股票時發生錯誤：{str(e)}"
+
+# 將股票資訊保存到 SQLite 資料庫
+def save_to_database(ticker, company_name, valuation, risk):
+    try:
+        conn = sqlite3.connect(DB_FILE_PATH)
+        cursor = conn.cursor()
+        # 插入股票資料
+        cursor.execute('''
+        INSERT INTO stocks (ticker, company_name, valuation, risk, date)
+        VALUES (?, ?, ?, ?, CURRENT_DATE)
+        ''', (ticker, company_name, valuation, risk))
+        
+        conn.commit()
+        conn.close()
+        print(f"股票代號 {ticker} 的數據已成功保存到資料庫。")
+    except Exception as e:
+        print(f"保存股票資訊時發生錯誤：{str(e)}")
 
 # Line Bot 的 Webhook 處理
 @app.route("/callback", methods=['POST'])
 def callback():
-    signature = request.headers['X-Line-Signature']
-    body = request.get_data(as_text=True)
+    signature = request.headers.get('X-Line-Signature')  # 從請求頭中取得簽名
+    body = request.get_data(as_text=True)  # 取得請求內容
     try:
-        handler.handle(body, signature)
-    except InvalidSignatureError:
+        handler.handle(body, signature)  # 使用 WebhookHandler 驗證和處理
+    except InvalidSignatureError:  # 如果簽名無效，返回錯誤
+        print("無效的簽名錯誤")
         abort(400)
+    except Exception as e:
+        print(f"處理回調時發生錯誤：{str(e)}")
+        abort(500)
     return 'OK'
 
-# 處理使用者發送的訊息
+# 處理使用者發送的文字訊息
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    user_input = event.message.text.strip()
+    user_input = event.message.text.strip()  # 取得使用者輸入的訊息
 
-    # 檢查是否為 8 位數的數字
-    if user_input.isdigit() and len(user_input) == 8:
-        result = check_invoice(user_input)
-        # 回覆訊息
-        if result in prize_messages:
-            reply_message = prize_messages[result]
-        else:
-            reply_message = result
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"您輸入的發票號碼為：{user_input}\n {reply_message}"))
+    # 判斷是否為股票代號
+    if user_input.isdigit() or "." in user_input:
+        # 如果是純數字，為台灣股票自動添加市場代碼
+        if "." not in user_input:
+            user_input += ".TW"  # 默認添加台灣市場代碼
+        result = get_stock_health(user_input)  # 查詢股票健康資料
     else:
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="請輸入 8 位數的發票號碼。"))
+        result = "無效的股票代號，請輸入正確的股票代號（例如：2330 或 AAPL）。"
 
+    # 回應結果
+    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=result))
+
+# 啟動應用程式
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    initialize_database()  # 初始化資料庫
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))  # 設置執行的主機及埠號
